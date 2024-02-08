@@ -17,6 +17,8 @@ public partial class PackstionForm : Form
 
     private System.Windows.Forms.Timer timer;
 
+    private string selectedContainer = "";
+
     private ContainerModel selectedContainerModel;
     private UserModel SelectedUser { get; set; }
 
@@ -108,75 +110,22 @@ public partial class PackstionForm : Form
 
     private async void openContainerButton_Click(object sender, EventArgs e)
     {
-        string selectedContainer = "";
-
+        
         if (selectedContainerModel is not null)
         {
             selectedContainer = (selectedContainerModel.Id - 2).ToString();
 
-            await arduinoAccess.SentDataToArduino(selectedContainer);
+            await arduinoAccess.SentDataToArduino(selectedContainer);         
 
-            bool arduionoOutputbool = true;
+            string doorStatus = await Task.Run(async () => await MonitorArudiono());
 
-          
-            while (arduionoOutputbool)
+            if(doorStatus == "Closed")
             {
-                string arduionoOutput = await arduinoAccess.ReceivedDataFromArduino();
+                timer.Tick += new EventHandler(SetGroupBoxToBasic);
+                timer.Start();
 
-                if (arduionoOutput is not null && arduionoOutput == "Closed\r")
-                {
-
-                    arduionoOutputbool = false;
-
-                    var container = containers.FirstOrDefault(i => i.Id == selectedContainerModel.Id);
-
-                    var package = container.PackageModel;
-
-                    package.PackStatus = PackageStatus.Collected;
-                    package.CollectedDate = DateTime.Now;
-
-                    await packageAccess.SetPackageStatus(package);
-
-                    var updateContainerDTO = new ContainerModel
-                    {
-                        Id = container.Id,
-                        ContStatus = ContainerStatus.Empty,
-                        ContTemp = container.ContTemp,
-                        DoorStatus = DoorStatus.Closed,
-                        StationId = container.StationId
-                    };
-
-                    await containerAccess.SetContainerStatus(updateContainerDTO);
-
-                    await containerAccess.SetContainerDoorStatus(updateContainerDTO);
-
-                }
-                else
-                {
-                    collectYourPackagegroupBox.Hide();
-                    doorStatusGroupBox.Show();
-
-                    await containerAccess.SetContainerDoorStatus(new UpdateContainerDTO
-                    {
-                        Id = selectedContainerModel.Id,
-                        ContStatus = ContainerStatus.Full,
-                        ContTemp = selectedContainerModel.ContTemp,
-                        DoorStatus = DoorStatus.Open,
-                        StationId = selectedContainerModel.StationId
-
-                    });
-
-                    statusLabel.Invoke((MethodInvoker)delegate
-                    {
-                        statusLabel.Text = $"Please collect Your package. Door {selectedContainer} is open.";
-                    });
-                }
+                ShowGoodByeLabel(this, EventArgs.Empty);
             }
-          
-            timer.Tick += new EventHandler(SetGroupBoxToBasic);
-            timer.Start();
-
-            ShowGoodByeLabel(this, EventArgs.Empty);
             
         }
         else
@@ -192,9 +141,9 @@ public partial class PackstionForm : Form
 
         if (selectedContainerModel is not null)
         {
-            //-1
+
             openContainerButton.Show();
-            openContainerButton.Text = $"Open the Container Nr. {selectedContainerModel.Id - 2}";
+            openContainerButton.Text = $"Open the Container Nr. {selectedContainerModel.Id - 1}";
         }
 
     }
@@ -230,5 +179,73 @@ public partial class PackstionForm : Form
                 }
             }                   
         }
+    }
+
+    private async Task<string> MonitorArudiono()
+    {
+        string status = "";
+
+        bool arduionoOutputbool = true;
+
+        while (arduionoOutputbool)
+        {
+            string arduionoOutput = await arduinoAccess.ReceivedDataFromArduino();
+
+            if (arduionoOutput is not null && arduionoOutput == "Closed\r")
+            {
+
+                arduionoOutputbool = false;
+
+                var container = containers.FirstOrDefault(i => i.Id == selectedContainerModel.Id);
+
+                var package = container.PackageModel;
+
+                package.PackStatus = PackageStatus.Collected;
+                package.CollectedDate = DateTime.Now;
+
+                await packageAccess.SetPackageStatus(package);
+
+                var updateContainerDTO = new ContainerModel
+                {
+                    Id = container.Id,
+                    ContStatus = ContainerStatus.Empty,
+                    ContTemp = container.ContTemp,
+                    DoorStatus = DoorStatus.Closed,
+                    StationId = container.StationId
+                };
+
+                //Set Container status To Empty and door staus to closed
+                await containerAccess.SetContainerStatus(updateContainerDTO);
+
+                await containerAccess.SetContainerDoorStatus(updateContainerDTO);
+
+                status = "Closed";
+            }
+            else
+            {
+                BeginInvoke(() =>
+                {
+                    collectYourPackagegroupBox.Hide();
+                    doorStatusGroupBox.Show();
+                    statusLabel.Text = $"Please collect Your package. Door {selectedContainerModel.Id - 1} is open.";
+                });
+
+                //Set door status to Open
+                await containerAccess.SetContainerDoorStatus(new UpdateContainerDTO
+                {
+                    Id = selectedContainerModel.Id,
+                    ContStatus = ContainerStatus.Full,
+                    ContTemp = selectedContainerModel.ContTemp,
+                    DoorStatus = DoorStatus.Open,
+                    StationId = selectedContainerModel.StationId
+
+                });
+
+                status = "Open";
+             }
+
+        }
+
+        return status;
     }
 }
